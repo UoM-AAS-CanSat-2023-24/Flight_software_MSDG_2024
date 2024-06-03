@@ -128,7 +128,8 @@ struct RxPacket
 	int packetCount = 0;
 	char* cmdType = "";
 	char* strCmdData = "";
-	int timeCmdData[6] = { 00,00,00,00,00,0000 }; // {hh, mm, ss, dd, mm, yyyy} 
+	tmElements_t tm = {0,0,0,0,0,0,0}; // this is a time format used to conver to epochs. it's a struct of uints8_t in form {sec,min,hr, day of the week(odd ik), day, month, year - 1970
+	
 	float fltCmdData = 0.0;
 } currentRxPacket; // global Rx packet
 
@@ -204,9 +205,12 @@ void ParsePacket(char* strPacket)
 		token = strtok(NULL, " ,<>");
 		currentRxPacket.strCmdData = token;
 		currentRxPacket.fltCmdData = 0;
-		currentRxPacket.timeCmdData[0] = 0;
-		currentRxPacket.timeCmdData[1] = 0;
-		currentRxPacket.timeCmdData[2] = 0; // resets other values 
+		currentRxPacket.tm.Second = 0;
+		currentRxPacket.tm.Minute = 0;
+		currentRxPacket.tm.Hour = 0; 
+		currentRxPacket.tm.Day = 0;
+		currentRxPacket.tm.Month = 0;
+		currentRxPacket.tm.Year = 0;// resets other values 
 
 
 	}
@@ -217,9 +221,12 @@ void ParsePacket(char* strPacket)
 		{
 			currentRxPacket.strCmdData = token; // all strings need a null char 
 			currentRxPacket.fltCmdData = 0;
-			currentRxPacket.timeCmdData[0] = 0;
-			currentRxPacket.timeCmdData[1] = 0;
-			currentRxPacket.timeCmdData[2] = 0; // resets other values 
+			currentRxPacket.tm.Second = 0;
+			currentRxPacket.tm.Minute = 0;
+			currentRxPacket.tm.Hour = 0;
+			currentRxPacket.tm.Day = 0;
+			currentRxPacket.tm.Month = 0;
+			currentRxPacket.tm.Year = 0;// resets other values 
 		}
 
 		else  // if it's not further parses it. this only works bc the ST command MUST be one or the other 
@@ -229,22 +236,22 @@ void ParsePacket(char* strPacket)
 			currentRxPacket.fltCmdData = 0; // resets other values 
 
 			token = strtok(token, " /:");
-			currentRxPacket.timeCmdData[0] = atoi(token); // these lines parse for UTC time given in hours:mins:secs/days/months/years 
+			currentRxPacket.tm.Hour = (uint8_t)atoi(token); // these lines parse for UTC time given in hours:mins:secs/days/months/years 
 
 			token = strtok(NULL, " /:");
-			currentRxPacket.timeCmdData[1] = atoi(token);
+			currentRxPacket.tm.Minute = (uint8_t)atoi(token);
 
 			token = strtok(NULL, " /:");
-			currentRxPacket.timeCmdData[2] = atoi(token);
+			currentRxPacket.tm.Second = (uint8_t)atoi(token);
 
 			token = strtok(NULL, " /:");
-			currentRxPacket.timeCmdData[3] = atoi(token);
+			currentRxPacket.tm.Day = (uint8_t)atoi(token);
 
 			token = strtok(NULL, " /:");
-			currentRxPacket.timeCmdData[4] = atoi(token);
+			currentRxPacket.tm.Month = (uint8_t)atoi(token);
 
 			token = strtok(NULL, " /:");
-			currentRxPacket.timeCmdData[5] = atoi(token);
+			currentRxPacket.tm.Year = (uint8_t)(atoi(token)-1970); // gotta be offset from epoch start year :)
 
 		}
 	}
@@ -254,9 +261,12 @@ void ParsePacket(char* strPacket)
 		token = strtok(NULL, " ,<>");
 		currentRxPacket.strCmdData = token;
 		currentRxPacket.fltCmdData = 0;
-		currentRxPacket.timeCmdData[0] = 0;
-		currentRxPacket.timeCmdData[1] = 0;
-		currentRxPacket.timeCmdData[2] = 0; // resets other values  
+		currentRxPacket.tm.Second = 0;
+		currentRxPacket.tm.Minute = 0;
+		currentRxPacket.tm.Hour = 0;
+		currentRxPacket.tm.Day = 0;
+		currentRxPacket.tm.Month = 0;
+		currentRxPacket.tm.Year = 0;// resets other values  
 
 
 	}
@@ -265,9 +275,12 @@ void ParsePacket(char* strPacket)
 		token = strtok(NULL, " ,<>");
 		currentRxPacket.strCmdData = "0";
 		currentRxPacket.fltCmdData = 0;
-		currentRxPacket.timeCmdData[0] = 0;
-		currentRxPacket.timeCmdData[1] = 0;
-		currentRxPacket.timeCmdData[2] = 0; // resets other values 
+		currentRxPacket.tm.Second = 0;
+		currentRxPacket.tm.Minute = 0;
+		currentRxPacket.tm.Hour = 0;
+		currentRxPacket.tm.Day = 0;
+		currentRxPacket.tm.Month = 0;
+		currentRxPacket.tm.Year = 0;// resets other values 
 
 	}
 	else if (strcmp(token, "BCN") == 0)
@@ -275,9 +288,12 @@ void ParsePacket(char* strPacket)
 		token = strtok(NULL, " ,<>");
 		currentRxPacket.strCmdData = token;
 		currentRxPacket.fltCmdData = 0;
-		currentRxPacket.timeCmdData[0] = 0;
-		currentRxPacket.timeCmdData[1] = 0;
-		currentRxPacket.timeCmdData[2] = 0; // resets other values  
+		currentRxPacket.tm.Second = 0;
+		currentRxPacket.tm.Minute = 0;
+		currentRxPacket.tm.Hour = 0;
+		currentRxPacket.tm.Day = 0;
+		currentRxPacket.tm.Month = 0;
+		currentRxPacket.tm.Year = 0;// resets other values 
 
 	}
 	else if (strcmp(token, "SIMP") == 0)
@@ -285,9 +301,12 @@ void ParsePacket(char* strPacket)
 		token = strtok(NULL, " ,<>");
 		currentRxPacket.strCmdData = "0";
 		currentRxPacket.fltCmdData = strtof(token, NULL); // conversion from string to float.
-		currentRxPacket.timeCmdData[0] = 0;
-		currentRxPacket.timeCmdData[1] = 0;
-		currentRxPacket.timeCmdData[2] = 0; // resets other values  
+		currentRxPacket.tm.Second = 0;
+		currentRxPacket.tm.Minute = 0;
+		currentRxPacket.tm.Hour = 0;
+		currentRxPacket.tm.Day = 0;
+		currentRxPacket.tm.Month = 0;
+		currentRxPacket.tm.Year = 0;// resets other values 
 
 	}
 
