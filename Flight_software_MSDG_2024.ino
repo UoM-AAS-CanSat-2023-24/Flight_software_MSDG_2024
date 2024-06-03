@@ -9,15 +9,15 @@
 	+ Follow this guide to install the correct drivers https://www.youtube.com/watch?v=RcEzUjNr634
 
 	Current problems to solve:
-	- Which time to be used for which mechanisms?
-	-
-	-
+
  
 */
 
  
 
 // this doesn't include lib for voltage sensor 
+
+//auto included 
 #include <DFRobot_LWLP.h>
 #include <Wire.h>
 #include <sh2.h>
@@ -33,10 +33,13 @@
 #include <Printers.h>
 
 
+// manually included 
 #include <Adafruit_GPS.h>
 #include <Adafruit_BMP3XX.h>
 #include <Adafruit_BNO08x.h>
 #include <XBee.h>
+#include <DS1307RTC.h>
+#include <TimeLib.h>
 
 
 
@@ -51,7 +54,6 @@
 #define BUZZER_PIN 12
 #define LED_PIN 11
 
-
 #define BMP_SCL 19
 #define BMP_SDA 18
 #define BNO08X_SDA 19
@@ -64,21 +66,28 @@
 
 
 //---global variables---
-bool flightState;// 0 for ascent, 1 for descent
-bool cameraState;// 0 for inactive, 1 for active
-bool simState; // 0 for actual flight, 1 for simulation State
-bool telemetryState; // 0 for inactive 1 for active 
+
+// state vars
+bool flightState =0;// 0 for ascent, 1 for descent
+bool camera1State = 0;// 0 for inactive, 1 for active this is the PID cam and also controls the state of the PID loop
+bool camera2State = 0;  // 0 for inactive, 1 for active this cam only actives alt > 600m
+bool groundedState =0; // 0 for not grounded 1 for grounded
+bool missionTimeState = 1; // 0 for UTC 1 for GPS
+bool simState = 0; // 0 for actual flight, 1 for simulation State
+bool telemetryState = 0; // 0 for inactive 1 for active 
+
 
 unsigned long start = millis();
-long int programTime; // needs to be set in millis or micros depending on what louis says 
+long int programTime; 
 long int lastTransmissionTime; // the last recorded program time at which telemetry was sent
 long int lastPIDUpdateTime; // last time PID algorithm was updated 
 int telemetryMissionTime[3]; // stores the current time sent with any telemetry 
 int deltaT; // time used in PID algorithm
 
-double satelliteAltitude; // this could change to float depending on size of input from sensor 
-double previousAltitude;
 
+// Sensor reading data  IK it's grim t that these are global but I can't think of a better way of doing this 
+float satelliteAltitude; // this could change to float depending on size of input from sensor 
+float previousAltitude;
 
 // global objects
 XBeeWithCallbacks xbee = XBeeWithCallbacks(); // xbee with callbacks allows for error reporting from xbee chip 
@@ -119,7 +128,7 @@ struct RxPacket
 	int packetCount = 0;
 	char* cmdType = "";
 	char* strCmdData = "";
-	int timeCmdData[3] = { 00,00,00 };
+	int timeCmdData[6] = { 00,00,00,00,00,0000 }; // {hh, mm, ss, dd, mm, yyyy} 
 	float fltCmdData = 0.0;
 } currentRxPacket; // global Rx packet
 
@@ -201,7 +210,7 @@ void ParsePacket(char* strPacket)
 
 
 	}
-	else if (strcmp(token, "ST") == 0) // THIS PARTICULAR SECTION STILL NEEDS TESTING
+	else if (strcmp(token, "ST") == 0) 
 	{
 		token = strtok(NULL, " ,<>");
 		if (strcmp(token, "GPS") == 0) // checks to see if it's "GPS" 
@@ -219,14 +228,23 @@ void ParsePacket(char* strPacket)
 			currentRxPacket.strCmdData = "0";
 			currentRxPacket.fltCmdData = 0; // resets other values 
 
-			token = strtok(token, " :");
-			currentRxPacket.timeCmdData[0] = atoi(token);
+			token = strtok(token, " /:");
+			currentRxPacket.timeCmdData[0] = atoi(token); // these lines parse for UTC time given in hours:mins:secs/days/months/years 
 
-			token = strtok(NULL, " :");
+			token = strtok(NULL, " /:");
 			currentRxPacket.timeCmdData[1] = atoi(token);
 
-			token = strtok(NULL, " :");
+			token = strtok(NULL, " /:");
 			currentRxPacket.timeCmdData[2] = atoi(token);
+
+			token = strtok(NULL, " /:");
+			currentRxPacket.timeCmdData[3] = atoi(token);
+
+			token = strtok(NULL, " /:");
+			currentRxPacket.timeCmdData[4] = atoi(token);
+
+			token = strtok(NULL, " /:");
+			currentRxPacket.timeCmdData[5] = atoi(token);
 
 		}
 	}
@@ -360,7 +378,7 @@ float GetPressure()
 {
 	float pressure = 0;
 	if (bmp.performReading()) {
-		pressure = bmp.pressure / 100.0;
+		pressure = bmp.pressure / 1000.0;
 		
 	}
 	return pressure;
@@ -595,7 +613,7 @@ void SetupSensors() {
 
 //---checkers---
 
-bool descent_check()// returns 1 if descent is detected, this is placeholder and a more sophisticated check will likely be needed 
+bool CheckDescent()// returns 1 if descent is detected, this is placeholder and a more sophisticated check will likely be needed 
 {
 	if (satelliteAltitude < previousAltitude)
 	{
@@ -607,7 +625,7 @@ bool descent_check()// returns 1 if descent is detected, this is placeholder and
 	}
 }
 
-bool grounded_check()
+bool CheckGrounded()
 {
 	if(satelliteAltitude = previousAltitude) // again a place holder meaning a much more robust check is likely to be needed 
 	{
@@ -620,7 +638,40 @@ bool grounded_check()
 }
 
 
+//---Hardware actuators--- 
 
+void SoundBuzzer()
+{
+	digitalWrite(BUZZER_PIN, HIGH); // turn on
+
+}
+
+void SilienceBuzzer()
+{
+	digitalWrite(BUZZER_PIN, LOW); // turn off 
+}
+
+void ReadSensors(bool simSateArg, bool missionTimeSate)
+{
+	if (simSateArg == 1) 
+	{
+		txPacket.pressure = currentRxPacket.fltCmdData;
+	}
+	else
+	{
+		txPacket.pressure = GetPressure();
+		txPacket.altitude = ((pow((SEALEVELPRESSURE_HPA * 0.1) / GetPressure(), 1 / 5.257) - 1) * (GetTemperature() + 273.15)) / 0.0065;
+
+	}
+	if (missionTimeSate == 1) 
+	{
+
+	}
+	else 
+	{
+
+	}
+}
 
 void setup() 
 {
@@ -628,8 +679,8 @@ void setup()
 	lastTransmissionTime = millis();
 
 
-	Serial1.begin(115200);
-	xbee.setSerial(Serial1); // this uses a different serial (for Teensy 4.1 Rx1 and Tx1)
+	Serial3.begin(115200); // THIS NEEDS TO BE CHANGED BASED ON CHARS WIRING 
+	xbee.setSerial(Serial3); // this uses a different serial (for Teensy 4.1 Rx1 and Tx1)
 	Serial.begin(115200);// this serial is simply for outputs to the serial port of a laptop
 	xbee.onPacketError(printErrorCb, (uintptr_t)(Print*)(&Serial)); // does some weird shite to print out our errors  on the serial port. these will need commenting out on the final version
 	xbee.onTxStatusResponse(printErrorCb, (uintptr_t)(Print*)(&Serial));
@@ -637,11 +688,21 @@ void setup()
 	xbee.onRx16Response(ReceiveTelemetry, 0); // ties our telemetry handling function to any 16 byte Rx events
 
 
-	//SetupSensors();
+	//SetupSensors(); THIS NEEDS TO BE UNCOMMENTED WHEN ACTUALLY RUN 
   
-	//EEPROM_data_load();
-	flightState = 0;
+	pinMode(BUZZER_PIN, OUTPUT); // setting up buzzer pin 
+	
 
+	//EEPROM_data_load();
+	flightState = 0; // auto assume ascent state 
+
+
+	setSyncProvider(RTC.get);   // the function to get the time from the RTC
+	if (timeStatus() != timeSet) 
+	{
+		Serial.println("Unable to sync with the RTC");
+	}
+	 
 
 
 }
@@ -661,11 +722,11 @@ void loop()
 
 		if (satelliteAltitude >= 600)
 		{
-			cameraState = 1;
+			camera2State = 1;
 		} // assumed altitude in meteres 
 		else;
 		
-		if (descent_check() == 1)
+		if (CheckDescent() == 1)
 		{
 			flightState = 1; 
 			//aerobreak_deploy();
@@ -675,9 +736,9 @@ void loop()
 		break;
 
 	case 1: // descending 
-		if (grounded_check() == 1)
+		if (CheckGrounded() == 1)
 		{
-			//buzzer_toggle();
+			SoundBuzzer();
 		}
 		else if (satelliteAltitude <= 100) // again assumed altitude given in meters
 		{
@@ -690,16 +751,16 @@ void loop()
 
 	if (programTime - lastPIDUpdateTime > deltaT) 
 	{
-		switch (cameraState) 
+		switch (camera1State) 
 		{
 		case 0: // inactive camera
 
-			//PID_set();
+			
 
 			break;
 		case 1: // active camera
 
-
+				//PID_set();
 
 			break;
 		}
@@ -722,7 +783,7 @@ void loop()
 		case 1: // active telemetry 
 
 
-			//telemetry_transmit();
+			SendTelemetry(txPacket, simState);
 
 
 			break;
