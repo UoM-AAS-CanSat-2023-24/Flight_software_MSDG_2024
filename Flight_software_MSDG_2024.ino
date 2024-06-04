@@ -68,13 +68,16 @@
 //---global variables---
 
 // state vars
-bool flightState =0;// 0 for ascent, 1 for descent
+bool flightState = 0;// 0 for ascent, 1 for descent
 bool camera1State = 0;// 0 for inactive, 1 for active this is the PID cam and also controls the state of the PID loop
 bool camera2State = 0;  // 0 for inactive, 1 for active this cam only actives alt > 600m
-bool groundedState =0; // 0 for not grounded 1 for grounded
+bool groundedState = 0; // 0 for not grounded 1 for grounded
 bool missionTimeState = 1; // 0 for UTC 1 for GPS
 bool simState = 0; // 0 for actual flight, 1 for simulation State
 bool telemetryState = 0; // 0 for inactive 1 for active 
+bool hsDeployedSate = 0; // 0 for not deployed, 1 for deployed
+bool pcDelpoyedSate = 0; // 0 for not deployed, 1 for deployed 
+
 
 
 unsigned long start = millis();
@@ -183,7 +186,7 @@ void SendTelemetry(PacketStruct packetArg , bool simStateArg)
 void ParsePacket(char* strPacket)
 {
 	// this function is built on the bases that ALL incoming data is in the format <CMD, 2045, command type, command data>
-	static int sPacketCount = 0;
+	static int sPacketCount = 1;
 	currentRxPacket.packetCount = sPacketCount;
 	sPacketCount += 1;
 
@@ -675,21 +678,107 @@ void ReadSensors(bool simSateArg, bool missionTimeSate)
 	if (simSateArg == 1) 
 	{
 		txPacket.pressure = currentRxPacket.fltCmdData;
+		txPacket.altitude = ((pow((SEALEVELPRESSURE_HPA * 0.1) / currentRxPacket.fltCmdData, 1 / 5.257) - 1) * (GetTemperature() + 273.15)) / 0.0065; // calc altitude from simmed data
 	}
 	else
 	{
 		txPacket.pressure = GetPressure();
-		txPacket.altitude = ((pow((SEALEVELPRESSURE_HPA * 0.1) / GetPressure(), 1 / 5.257) - 1) * (GetTemperature() + 273.15)) / 0.0065;
+		txPacket.altitude = GetBMPaltitude();
 
 	}
-	if (missionTimeSate == 1) 
+	txPacket.missionTime[0] = hour();
+	txPacket.missionTime[1] = minute();
+	txPacket.missionTime[2] = second();
+
+	if(simState)
+	{
+		txPacket.mode = 'S';
+	}
+	else
+	{
+		txPacket.mode = 'F';
+	}
+
+	
+	if(groundedState == 1)
+	{
+		txPacket.state = "ASCENDING";
+	}
+	else if (pcDelpoyedSate == 1)
+	{
+		txPacket.state = "PC_DEPLOYED";
+	}
+	else if(hsDeployedSate ==1)
+	{
+		txPacket.state = "HS_DEPLOYED";
+	}
+	else if(flightState == 1)
+	{
+		txPacket.state = "DESCENDING";
+	}
+	else if (flightState == 0)
+	{
+		txPacket.state = "ASCENDING";
+	}
+	else
+	{
+		txPacket.state = "UNDEFINED";
+	}
+	
+
+
+	txPacket.airSpeed = GetPitotVelocity();
+
+
+
+	if (hsDeployedSate) 
+	{
+		txPacket.hsDeployed = 'P';
+	}
+	else
+	{
+		txPacket.hsDeployed = 'N';
+	}
+
+	if (pcDelpoyedSate)
+	{
+		txPacket.hsDeployed = 'C';
+	}
+	else
+	{
+		txPacket.hsDeployed = 'N';
+	}
+	
+	txPacket.temperature = GetTemperature();
+	txPacket.voltage = GetVoltage();
+	txPacket.gpsTime[0] = GetGPShours();
+	txPacket.gpsTime[1] = GetGPSmins();
+	txPacket.gpsTime[2] = GetGPSsecs();
+	txPacket.gpsAltitude = GetGPSaltitude();
+	txPacket.gpsLatitude = GetLatitude();
+	txPacket.gpsLongitude = GetLongitude();
+	txPacket.gpsStats = GetSatellites();
+	txPacket.tiltX = GetTiltX();
+	txPacket.tiltY = GetTiltY();
+	txPacket.rotZ = GetRotationRate();
+	txPacket.cmdEcho = currentRxPacket.cmdType;
+}
+
+void DoCommand()
+{
+	static int lastRxPacketCount = 0; 
+
+	if(currentRxPacket.packetCount == lastRxPacketCount)
 	{
 
 	}
-	else 
+	else if(currentRxPacket.packetCount > lastRxPacketCount)
 	{
 
 	}
+
+	lastRxPacketCount = currentRxPacket.packetCount;
+
 }
 
 void setup() 
