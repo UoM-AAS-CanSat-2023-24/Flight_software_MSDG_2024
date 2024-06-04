@@ -74,6 +74,7 @@ bool camera2State = 0;  // 0 for inactive, 1 for active this cam only actives al
 bool groundedState = 0; // 0 for not grounded 1 for grounded
 bool missionTimeState = 1; // 0 for UTC 1 for GPS
 bool simState = 0; // 0 for actual flight, 1 for simulation State
+bool simEnableState = 0; // 0 for not 1 for enabled 
 bool telemetryState = 0; // 0 for inactive 1 for active 
 bool hsDeployedSate = 0; // 0 for not deployed, 1 for deployed
 bool pcDelpoyedSate = 0; // 0 for not deployed, 1 for deployed 
@@ -91,6 +92,8 @@ int deltaT; // time used in PID algorithm
 // Sensor reading data  IK it's grim t that these are global but I can't think of a better way of doing this 
 float satelliteAltitude; // this could change to float depending on size of input from sensor 
 float previousAltitude;
+float altitudeOffset = 0;
+
 
 // global objects
 XBeeWithCallbacks xbee = XBeeWithCallbacks(); // xbee with callbacks allows for error reporting from xbee chip 
@@ -678,12 +681,12 @@ void ReadSensors(bool simSateArg, bool missionTimeSate)
 	if (simSateArg == 1) 
 	{
 		txPacket.pressure = currentRxPacket.fltCmdData;
-		txPacket.altitude = ((pow((SEALEVELPRESSURE_HPA * 0.1) / currentRxPacket.fltCmdData, 1 / 5.257) - 1) * (GetTemperature() + 273.15)) / 0.0065; // calc altitude from simmed data
+		txPacket.altitude = (((pow((SEALEVELPRESSURE_HPA * 0.1) / currentRxPacket.fltCmdData, 1 / 5.257) - 1) * (GetTemperature() + 273.15)) / 0.0065)-altitudeOffset; // calc altitude from simmed data
 	}
 	else
 	{
 		txPacket.pressure = GetPressure();
-		txPacket.altitude = GetBMPaltitude();
+		txPacket.altitude = GetBMPaltitude() - altitudeOffset;
 
 	}
 	txPacket.missionTime[0] = hour();
@@ -764,22 +767,119 @@ void ReadSensors(bool simSateArg, bool missionTimeSate)
 	txPacket.cmdEcho = currentRxPacket.cmdType;
 }
 
+
+
 void DoCommand()
 {
 	static int lastRxPacketCount = 0; 
 
-	if(currentRxPacket.packetCount == lastRxPacketCount)
+	if(currentRxPacket.packetCount == lastRxPacketCount) // checks if the last packet number is the same (true if no new command)
 	{
+
+
 
 	}
-	else if(currentRxPacket.packetCount > lastRxPacketCount)
+	else if(currentRxPacket.packetCount > lastRxPacketCount) // new command!
 	{
+		if (strcmp(currentRxPacket.cmdType,"CX") == 0) //  looks confusing but == 0 means they are the same.
+		{
+			if(strcmp(currentRxPacket.strCmdData,"ON")==0)
+			{
+				telemetryState = 1; 
+			}
+			else if(strcmp(currentRxPacket.strCmdData, "OFF") == 0)
+			{
+				telemetryState = 0;
+			}
+			else
+			{
+				Serial.println("Unrecognised CX command");
+			}
+		}
 
+		else if (strcmp(currentRxPacket.cmdType, "ST") == 0)
+		{
+			if(strcmp(currentRxPacket.strCmdData, "GPS") == 0)
+			{
+				missionTimeState = 1;
+			}
+			else // else if isn't really possible here 
+			{
+				RTC.set(makeTime(currentRxPacket.tm));
+				missionTimeState = 0;
+			}
+		}
+		
+		else if (strcmp(currentRxPacket.cmdType, "SIM") == 0)
+		{
+			if(strcmp(currentRxPacket.cmdType, "ENABLE") == 0)
+			{
+				simEnableState = 1;
+			}
+			else if (strcmp(currentRxPacket.cmdType, "ACTIVATE") == 0) 
+			{
+				if(simEnableState = 1)
+				{
+					simState = 1;
+				}
+				else
+				{
+					Serial.println("SIM NOT ENABLED COMMAND IGNORED");
+				}
+			}
+			else if(strcmp(currentRxPacket.cmdType, "DISABLE") == 0)
+			{
+				simEnableState = 0;
+				simState = 0;
+			}
+			else
+			{
+				Serial.println("UNRECOGNISED SIM COMMAND");
+			}
+
+
+		}
+		else if (strcmp(currentRxPacket.cmdType, "CAL") == 0)
+		{
+			if(simState)
+			{
+				altitudeOffset = currentRxPacket.fltCmdData;
+			}
+			else
+			{
+				altitudeOffset = GetBMPaltitude();
+			}
+		}
+
+		else if (strcmp(currentRxPacket.cmdType, "BCN") == 0)
+		{
+			if (strcmp(currentRxPacket.strCmdData, "ON") == 0)
+			{
+				SoundBuzzer();
+			}
+			else if (strcmp(currentRxPacket.strCmdData, "OFF") == 0)
+			{
+				SilienceBuzzer();
+			}
+			else
+			{
+				Serial.println("Unrecognised BCN command");
+			}
+		}
+		
+		
+
+	}
+	else
+	{
+		Serial.println("command flow error");
 	}
 
 	lastRxPacketCount = currentRxPacket.packetCount;
 
 }
+
+
 
 void setup() 
 {
@@ -814,6 +914,7 @@ void setup()
 
 
 }
+
 
 // the loop function runs over and over again until power down or reset
 void loop() 
