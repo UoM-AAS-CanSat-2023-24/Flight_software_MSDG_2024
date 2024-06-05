@@ -40,6 +40,7 @@
 #include <XBee.h>
 #include <DS1307RTC.h>
 #include <TimeLib.h>
+#include <EEPROM.h>
 
 
 
@@ -63,6 +64,9 @@
 #define GPSSerial Serial2
 #define GPSECHO  true
 #define BQ34Z100 0x55 
+
+const int STATE_EEPROM_ADDRESS = 0;
+const int ALTITUDE_EEPROM_ADDRESS = STATE_EEPROM_ADDRESS + 1;
 
 
 //---global variables---
@@ -152,7 +156,29 @@ struct euler_t
 
 //---functions---
 
-// TELEMETRY 
+//----EEEPROM---
+
+void SaveToEEEPROM(bool flightStateArg,float altArg)
+{
+	EEPROM.update(STATE_EEPROM_ADDRESS, flightStateArg);
+	EEPROM.put(ALTITUDE_EEPROM_ADDRESS, altArg);
+}
+
+void RestoreFromEEEPROM()
+{
+	flightState = EEPROM.read(STATE_EEPROM_ADDRESS);
+	EEPROM.get(ALTITUDE_EEPROM_ADDRESS, satelliteAltitude);
+
+}
+
+void ResetEEEPROM()
+{
+	EEPROM.update(STATE_EEPROM_ADDRESS, 0);
+	EEPROM.put(ALTITUDE_EEPROM_ADDRESS, 0.0);
+
+}
+
+//---Telemtry---  
 void SendData(char* data) // actual sending of data. Char pointer points to start memory address of string so string arguments can be used
 {
 	uint8_t* payload = (uint8_t*)data; // payload as in the datat to be sent not to be confused with CANSAT which is rocket payload
@@ -314,6 +340,17 @@ void ParsePacket(char* strPacket)
 		currentRxPacket.tm.Month = 0;
 		currentRxPacket.tm.Year = 0;// resets other values 
 
+	}
+	else if (strcmp(token,"ERSE")== 0)
+	{
+		currentRxPacket.strCmdData = "0";
+		currentRxPacket.fltCmdData = 0.0; // conversion from string to float.
+		currentRxPacket.tm.Second = 0;
+		currentRxPacket.tm.Minute = 0;
+		currentRxPacket.tm.Hour = 0;
+		currentRxPacket.tm.Day = 0;
+		currentRxPacket.tm.Month = 0;
+		currentRxPacket.tm.Year = 0;// resets other values 
 	}
 
 	else
@@ -768,7 +805,7 @@ void ReadSensors(bool simSateArg, bool missionTimeSate)
 }
 
 
-
+// commands 
 void DoCommand()
 {
 	static int lastRxPacketCount = 0; 
@@ -867,8 +904,15 @@ void DoCommand()
 			}
 		}
 		
+		else if (strcmp(currentRxPacket.cmdType, "ERSE") == 0)
+		{
+			ResetEEEPROM();
+		}
 		
-
+		else 
+		{
+			Serial.println("unrecognised command "); 
+		}
 	}
 	else
 	{
