@@ -92,11 +92,10 @@ long int lastPIDUpdateTime; // last time PID algorithm was updated
 int telemetryMissionTime[3]; // stores the current time sent with any telemetry 
 int deltaT; // time used in PID algorithm
 
-
-// Sensor reading data  IK it's grim t that these are global but I can't think of a better way of doing this 
-float satelliteAltitude; // this could change to float depending on size of input from sensor 
-float previousAltitude;
 float altitudeOffset = 0;
+float gpsGround = 0;
+float previousAltitude = 0;
+float previousPressure = 0;
 
 
 // global objects
@@ -167,7 +166,7 @@ void SaveToEEEPROM(bool flightStateArg,float altArg)
 void RestoreFromEEEPROM()
 {
 	flightState = EEPROM.read(STATE_EEPROM_ADDRESS);
-	EEPROM.get(ALTITUDE_EEPROM_ADDRESS, satelliteAltitude);
+	EEPROM.get(ALTITUDE_EEPROM_ADDRESS, txPacket.altitude);
 
 }
 
@@ -677,9 +676,18 @@ void SetupSensors() {
 
 bool CheckDescent()// returns 1 if descent is detected, this is placeholder and a more sophisticated check will likely be needed 
 {
-	if (satelliteAltitude < previousAltitude)
+	static int descentCounter = 0;
+	if (txPacket.altitude < previousAltitude)
 	{
-		return 1;
+		descentCounter += 1;
+	}
+	else
+	{
+		descentCounter = 0;
+	}
+	if(descentCounter >= 3)
+	{
+		return 1; 
 	}
 	else
 	{
@@ -689,7 +697,21 @@ bool CheckDescent()// returns 1 if descent is detected, this is placeholder and 
 
 bool CheckGrounded()
 {
-	if(satelliteAltitude = previousAltitude) // again a place holder meaning a much more robust check is likely to be needed 
+	static int groundedCounter = 0;
+	if(round(txPacket.altitude*10)/10 == round(previousAltitude*10)/10 )// rounded to nearest 0.1 of a meter 
+	{
+		groundedCounter += 1;
+	}
+	else if (round(GetGPSaltitude()*10)/10 <= gpsGround)
+	{
+		groundedCounter += 1;
+	}
+	else
+	{
+		groundedCounter = 0;
+	}
+
+	if(groundedCounter >= 10)
 	{
 		return 1;
 	}
@@ -713,22 +735,33 @@ void SilienceBuzzer()
 	digitalWrite(BUZZER_PIN, LOW); // turn off 
 }
 
-void ReadSensors(bool simSateArg, bool missionTimeSate)
+void ReadSensors(bool simSateArg, bool missionTimeSateArg)
 {
 	if (simSateArg == 1) 
 	{
-		txPacket.pressure = currentRxPacket.fltCmdData;
-		txPacket.altitude = (((pow((SEALEVELPRESSURE_HPA * 0.1) / currentRxPacket.fltCmdData, 1 / 5.257) - 1) * (GetTemperature() + 273.15)) / 0.0065)-altitudeOffset; // calc altitude from simmed data
+		txPacket.pressure = (currentRxPacket.fltCmdData);
+		txPacket.altitude = (((pow((SEALEVELPRESSURE_HPA * 0.1) / currentRxPacket.fltCmdData, 1 / 5.257) - 1) * (GetTemperature() + 273.15)) / 0.0065)-altitudeOffset; // calc altitude from simmed data no filter required 
+		
 	}
 	else
 	{
-		txPacket.pressure = GetPressure();
-		txPacket.altitude = GetBMPaltitude() - altitudeOffset;
+		txPacket.pressure = GetPressure()*0.5+previousPressure*0.5;
+		txPacket.altitude = (GetBMPaltitude() - altitudeOffset)*0.5+previousAltitude*0.5; // averaging of last output provides low pass filter 
 
 	}
-	txPacket.missionTime[0] = hour();
-	txPacket.missionTime[1] = minute();
-	txPacket.missionTime[2] = second();
+
+	if(missionTimeSateArg == 0)
+	{
+		txPacket.missionTime[0] = GetGPShours();
+		txPacket.missionTime[1] = GetGPSmins();
+		txPacket.missionTime[2] = GetGPSsecs();
+	}
+	else
+	{
+		txPacket.missionTime[0] = hour();
+		txPacket.missionTime[1] = minute();
+		txPacket.missionTime[2] = second();
+	}
 
 	if(simState)
 	{
@@ -881,6 +914,7 @@ void DoCommand()
 			if(simState)
 			{
 				altitudeOffset = currentRxPacket.fltCmdData;
+				gpsGround = GetGPSaltitude();
 			}
 			else
 			{
@@ -923,6 +957,22 @@ void DoCommand()
 
 }
 
+void DeployAerobreak()
+{
+
+}
+
+void EjectAerobreak()
+{
+
+}
+
+void DeployParachute()
+{
+
+}
+
+
 
 
 void setup() 
@@ -945,8 +995,9 @@ void setup()
 	pinMode(BUZZER_PIN, OUTPUT); // setting up buzzer pin 
 	
 
-	//EEPROM_data_load();
+	
 	flightState = 0; // auto assume ascent state 
+	groundedState = 0;
 
 
 	setSyncProvider(RTC.get);   // the function to get the time from the RTC
@@ -956,7 +1007,7 @@ void setup()
 	}
 	 
 
-
+	RestoreFromEEEPROM();
 }
 
 
@@ -973,7 +1024,7 @@ void loop()
 	{
 	case 0: // ascending 
 
-		if (satelliteAltitude >= 600)
+		if (txPacket.altitude >= 600)
 		{
 			camera2State = 1;
 		} // assumed altitude in meteres 
@@ -981,9 +1032,12 @@ void loop()
 		
 		if (CheckDescent() == 1)
 		{
-			flightState = 1; 
-			//aerobreak_deploy();
+			flightState = 1;
+			DeployAerobreak();
+			SaveToEEEPROM(flightState, txPacket.altitude);
 		}
+		else;
+	
 
 
 		break;
@@ -992,10 +1046,16 @@ void loop()
 		if (CheckGrounded() == 1)
 		{
 			SoundBuzzer();
+			groundedState = 1 ;
 		}
-		else if (satelliteAltitude <= 100) // again assumed altitude given in meters
+		else;
+
+		if (txPacket.altitude <= 100) // again assumed altitude given in meters
 		{
-			//parachute_deploy();
+			DeployParachute();
+			EjectAerobreak();
+			SaveToEEEPROM(flightState, txPacket.altitude);
+
 		}
 		else;
 		
@@ -1042,13 +1102,15 @@ void loop()
 			break;
 		}
 
-		//EEPROM_data_save(); // only saves data every second instead of every clock cycle
-		//SD_data_save();// ^^^
-
 		lastTransmissionTime = programTime;
 	}
 	else;
 
-	previousAltitude = satelliteAltitude; 
+	ReadSensors(simState, missionTimeState);
+
+	DoCommand();
+
+	previousAltitude = txPacket.altitude; 
+	previousPressure = txPacket.pressure;
   
 }
